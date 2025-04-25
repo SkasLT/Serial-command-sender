@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.0.0] - 2024-04-27
+## [1.0.0] - 2025-04-24
 
 ### Added
 - Initial release of Serial Command Sender (.exe) version
