@@ -50,8 +50,8 @@ def parse_groups(filepath):
 
             if comment_match:
                 text = comment_match.group(1).strip()
-                if "commands" in text.lower():
-                    base_name = text.lower().replace("ack", "").replace("commands", "").strip().title()
+                if "command" in text.lower():
+                    base_name = text.lower().replace("ack", "").replace("commands", "").replace("command", "").strip().title()
                     if base_name not in groups:
                         groups[base_name] = {"commands": [], "acks": []}
                     current_group = base_name
