@@ -21,4 +21,8 @@
 #define DISPLAY_READY 0x90
 #define DISPLAY_DONE  0x91
 
+// Multy byte commands
+#define MULTY_BYTE_CMD1 0x0001
+#define MULTY_BYTE_CMD2 0x0002
+
 #endif     // MY_DEVICE_COMMANDS_H_

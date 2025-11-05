@@ -2,6 +2,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
 import tkinter as tk
+from tkinter import messagebox
 import serial
 import serial.tools.list_ports
 import threading
@@ -23,7 +24,7 @@ DISPLAY_FORMATS = ["ASCII", "HEX", "HEX + ASCII", "DEC"]
 def find_commands_file():
     files = glob.glob("*_commands.h")
     if not files:
-        tk.messagebox.showerror("Error", "No *_commands.h file found in this directory.")
+        messagebox.showerror("Error", "No *_commands.h file found in this directory.")
         sys.exit(1)
     return files[0]
 
@@ -51,14 +52,24 @@ def parse_groups(filepath):
             if comment_match:
                 text = comment_match.group(1).strip()
                 if "command" in text.lower():
-                    base_name = text.lower().replace("ack", "").replace("commands", "").replace("command", "").strip().title()
+                    base_name = (
+                        text.lower()
+                        .replace("ack", "")
+                        .replace("commands", "")
+                        .replace("command", "")
+                        .strip()
+                        .title()
+                    )
                     if base_name not in groups:
                         groups[base_name] = {"commands": [], "acks": []}
                     current_group = base_name
                     current_type = "acks" if "ack" in text.lower() else "commands"
+
             elif define_match and current_group:
-                name, hex_val = define_match.groups()
-                groups[current_group][current_type].append((name, int(hex_val, 16)))
+                # Store the hex string as-is (without converting to int)
+                name, hex_str = define_match.groups()
+                hex_str = hex_str.strip()
+                groups[current_group][current_type].append((name, hex_str))
 
     return groups
 
@@ -87,18 +98,27 @@ class SerialApp:
         top.pack(padx=10, pady=5, fill=X)
 
         ttk.Label(top, text="Baud Rate:").grid(row=0, column=0)
-        ttk.Combobox(top, textvariable=self.baud_rate,
-                     values=["9600", "19200", "38400", "57600", "115200"], width=10).grid(row=0, column=1)
+        ttk.Combobox(
+            top,
+            textvariable=self.baud_rate,
+            values=["9600", "19200", "38400", "57600", "115200"],
+            width=10,
+        ).grid(row=0, column=1)
 
         ttk.Label(top, text="COM Port:").grid(row=0, column=2)
-        self.port_combo = ttk.Combobox(top, textvariable=self.port,
-                                       values=self.get_ports(), width=10)
+        self.port_combo = ttk.Combobox(
+            top, textvariable=self.port, values=self.get_ports(), width=10
+        )
         self.port_combo.grid(row=0, column=3)
         ttk.Button(top, text="⟳", command=self.refresh_ports).grid(row=0, column=4)
 
         ttk.Label(top, text="End Char:").grid(row=0, column=5)
-        end_combo = ttk.Combobox(top, textvariable=self.end_char_option,
-                                 values=list(END_CHAR_OPTIONS.keys()), width=18)
+        end_combo = ttk.Combobox(
+            top,
+            textvariable=self.end_char_option,
+            values=list(END_CHAR_OPTIONS.keys()),
+            width=18,
+        )
         end_combo.grid(row=0, column=6)
         end_combo.bind("<<ComboboxSelected>>", self.update_end_char)
 
@@ -115,11 +135,17 @@ class SerialApp:
         monitor_controls = ttk.Frame(self.root)
         monitor_controls.pack(padx=10, pady=(5, 10), fill=X)
         ttk.Label(monitor_controls, text="Display Format:").pack(side=LEFT)
-        ttk.Combobox(monitor_controls, textvariable=self.display_format,
-                     values=DISPLAY_FORMATS, width=15).pack(side=LEFT, padx=(5, 20))
+        ttk.Combobox(
+            monitor_controls,
+            textvariable=self.display_format,
+            values=DISPLAY_FORMATS,
+            width=15,
+        ).pack(side=LEFT, padx=(5, 20))
         ttk.Label(monitor_controls, text="Auto Scroll:").pack(side=LEFT)
         ttk.Checkbutton(monitor_controls, variable=self.auto_scroll).pack(side=LEFT)
-        ttk.Button(monitor_controls, text="Clear Output", command=self.clear_log).pack(side=RIGHT)
+        ttk.Button(
+            monitor_controls, text="Clear Output", command=self.clear_log
+        ).pack(side=RIGHT)
 
         search_frame = ttk.Frame(self.root)
         search_frame.pack(padx=10, pady=(0, 5), fill=X)
@@ -132,15 +158,24 @@ class SerialApp:
         canvas_frame.pack(fill=BOTH, expand=True)
 
         self.command_canvas = tk.Canvas(canvas_frame)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.command_canvas.yview)
+        scrollbar = ttk.Scrollbar(
+            canvas_frame, orient="vertical", command=self.command_canvas.yview
+        )
         self.command_canvas.configure(yscrollcommand=scrollbar.set)
 
         scrollbar.pack(side=RIGHT, fill=Y)
         self.command_canvas.pack(side=LEFT, fill=BOTH, expand=True)
 
         self.command_frame = ttk.Frame(self.command_canvas)
-        self.command_canvas.create_window((0, 0), window=self.command_frame, anchor="nw")
-        self.command_frame.bind("<Configure>", lambda e: self.command_canvas.configure(scrollregion=self.command_canvas.bbox("all")))
+        self.command_canvas.create_window(
+            (0, 0), window=self.command_frame, anchor="nw"
+        )
+        self.command_frame.bind(
+            "<Configure>",
+            lambda e: self.command_canvas.configure(
+                scrollregion=self.command_canvas.bbox("all")
+            ),
+        )
 
         self.render_command_groups()
 
@@ -161,13 +196,20 @@ class SerialApp:
         for widget in self.command_frame.winfo_children():
             widget.destroy()
         for group, data in self.filtered_data.items():
-            self.create_group_section(self.command_frame, group, data["commands"], data["acks"])
+            self.create_group_section(
+                self.command_frame, group, data["commands"], data["acks"]
+            )
 
     def create_group_section(self, parent, title, commands, acks):
         container = ttk.Frame(parent)
         container.pack(fill=X, padx=10, pady=5)
 
-        header = ttk.Label(container, text="▶ " + title, cursor="hand2", font=("Segoe UI", 10, "bold"))
+        header = ttk.Label(
+            container,
+            text="▶ " + title,
+            cursor="hand2",
+            font=("Segoe UI", 10, "bold"),
+        )
         header.pack(anchor="w")
 
         body = ttk.Frame(container)
@@ -184,23 +226,37 @@ class SerialApp:
 
         header.bind("<Button-1>", lambda e: toggle())
 
-        ttk.Label(body, text="Command", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(body, text="ACK Response", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, sticky="w", padx=(20, 0))
+        ttk.Label(
+            body, text="Command", font=("Segoe UI", 9, "bold")
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            body,
+            text="ACK Response",
+            font=("Segoe UI", 9, "bold"),
+        ).grid(row=0, column=2, sticky="w", padx=(20, 0))
 
         max_len = max(len(commands), len(acks))
         for i in range(max_len):
             if i < len(commands):
-                name, val = commands[i]
-                ttk.Label(body, text=f"{name} (0x{val:02X})").grid(row=i+1, column=0, sticky="w", padx=5)
-                ttk.Button(body, text="Send", command=lambda v=val: self.send_command(v)).grid(row=i+1, column=1, padx=5)
+                name, hex_str = commands[i]
+                ttk.Label(
+                    body, text=f"{name} (0x{hex_str.upper()})"
+                ).grid(row=i + 1, column=0, sticky="w", padx=5)
+                ttk.Button(
+                    body, text="Send", command=lambda v=hex_str: self.send_command(v)
+                ).grid(row=i + 1, column=1, padx=5)
             if i < len(acks):
-                name, val = acks[i]
-                ttk.Label(body, text=f"{name} (0x{val:02X})").grid(row=i+1, column=2, sticky="w", padx=(20, 0))
+                name, hex_str = acks[i]
+                ttk.Label(
+                    body, text=f"{name} (0x{hex_str.upper()})"
+                ).grid(row=i + 1, column=2, sticky="w", padx=(20, 0))
 
     def update_end_char(self, event=None):
         val = self.end_char_option.get()
         self.end_char.set(END_CHAR_OPTIONS[val])
-        self.end_char_label.config(text=f"Hex: 0x{self.end_char.get() if self.end_char.get() else 'None'}")
+        self.end_char_label.config(
+            text=f"Hex: 0x{self.end_char.get() if self.end_char.get() else 'None'}"
+        )
 
     def get_ports(self):
         return [p.device for p in serial.tools.list_ports.comports()]
@@ -210,7 +266,9 @@ class SerialApp:
 
     def connect(self):
         try:
-            self.serial_conn = serial.Serial(self.port.get(), int(self.baud_rate.get()), timeout=1)
+            self.serial_conn = serial.Serial(
+                self.port.get(), int(self.baud_rate.get()), timeout=1
+            )
             threading.Thread(target=self.read_serial, daemon=True).start()
             self.log("Connected to serial port.")
         except Exception as e:
@@ -221,12 +279,37 @@ class SerialApp:
             self.serial_conn.close()
             self.log("Disconnected.")
 
-    def send_command(self, value):
+    def send_command(self, value_hex):
+        """
+        Send command where value_hex is the hex part from the header (e.g. '80', '0001', '0601').
+        - 1-byte values (like '80') -> one byte
+        - 2-byte values (like '0001', '0601', 'AABB') -> two bytes [AA, BB]
+        Then append the selected end character.
+        """
         if self.serial_conn and self.serial_conn.is_open:
             try:
+                hex_str = str(value_hex).strip()
+
+                # Allow '0x' prefix just in case
+                if hex_str.lower().startswith("0x"):
+                    hex_str = hex_str[2:]
+
+                if len(hex_str) == 0:
+                    self.log("Empty command value.")
+                    return
+
+                # Pad to even number of hex digits so fromhex can parse
+                if len(hex_str) % 2 == 1:
+                    hex_str = "0" + hex_str
+
+                # Interpret hex string as sequence of bytes
+                cmd_bytes = bytes.fromhex(hex_str)
+
                 end = bytes.fromhex(self.end_char.get()) if self.end_char.get() else b""
-                self.serial_conn.write(bytes([value]) + end)
-                self.log(f"Sent: {self.format_bytes(bytes([value]) + end)}")
+                payload = cmd_bytes + end
+
+                self.serial_conn.write(payload)
+                self.log(f"Sent: {self.format_bytes(payload)}")
             except Exception as e:
                 self.log(f"Send error: {e}")
         else:
@@ -238,7 +321,7 @@ class SerialApp:
                 line = self.serial_conn.readline()
                 if line:
                     self.log(f"Received: {self.format_bytes(line)}")
-            except:
+            except Exception:
                 break
 
     def format_bytes(self, data):
@@ -251,7 +334,11 @@ class SerialApp:
             return " ".join(str(b) for b in data)
         else:
             hex_part = data.hex(" ").upper()
-            ascii_part = data.decode(errors="replace").replace("\r", "\\r").replace("\n", "\\n")
+            ascii_part = (
+                data.decode(errors="replace")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+            )
             return f"{hex_part}  ({ascii_part})"
 
     def log(self, text):
@@ -259,7 +346,10 @@ class SerialApp:
         self.output.text.insert("end", text + "\n")
         self.output.text.config(state="disabled")
         if self.auto_scroll.get():
-            self.output.text.yview("end")
+            try:
+                self.output.text.see("end")
+            except Exception:
+                pass
 
     def clear_log(self):
         self.output.text.config(state="normal")
