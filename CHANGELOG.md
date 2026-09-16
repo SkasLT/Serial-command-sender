@@ -7,14 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
-
-### Added
-- Mouse-wheel scrolling in the traffic display, decoded-message display, and command list.
-
 ## [1.3.0] - 2026-09-16
 
 ### Added
+- Mouse-wheel scrolling in the traffic display, decoded-message display, and command list.
 - Incoming ACK decoding with a separate display and raw, HEX text, and DEC text modes.
 - Installable `src/serial_command_sender` package with `pyproject.toml` metadata.
 - `serial-command-sender` and `python -m serial_command_sender` launch commands.
