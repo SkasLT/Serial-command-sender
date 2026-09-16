@@ -6,9 +6,11 @@ from tkinter import messagebox
 import serial
 import serial.tools.list_ports
 import threading
-import re
-import os
-import glob
+import argparse
+from pathlib import Path
+import queue
+import time
+from .ack_decoder import AckDecoder, parse_groups
 import sys
 
 END_CHAR_OPTIONS = {
@@ -21,68 +23,38 @@ END_CHAR_OPTIONS = {
 }
 DISPLAY_FORMATS = ["ASCII", "HEX", "HEX + ASCII", "DEC"]
 
-def find_commands_file():
-    files = glob.glob("*_commands.h")
-    if not files:
-        messagebox.showerror("Error", "No *_commands.h file found in this directory.")
-        sys.exit(1)
+def find_commands_file(filepath=None):
+    if filepath is not None:
+        path = Path(filepath).expanduser().resolve()
+        if not path.is_file():
+            raise ValueError(f"Command header does not exist: {path}")
+        return path
+    frozen = getattr(sys, "frozen", False)
+    directory = Path(sys.executable).parent if frozen else Path.cwd()
+    files = sorted(directory.glob("*_commands.h"))
+    if not files and not frozen:
+        return Path(__file__).resolve().parent / "data" / "My_device_commands.h"
+    if len(files) != 1:
+        raise ValueError(f"Expected exactly one *_commands.h file in {directory}; found {len(files)}.")
     return files[0]
 
-def parse_groups(filepath):
-    groups = {}
-    current_group = None
-    current_type = None
-    blank_lines = 0
-
-    with open(filepath, "r") as file:
-        for line in file:
-            stripped = line.strip()
-            if not stripped:
-                blank_lines += 1
-                continue
-            else:
-                if blank_lines >= 2:
-                    current_group = None
-                    current_type = None
-                blank_lines = 0
-
-            comment_match = re.match(r"//\s*(.+)", line)
-            define_match = re.match(r"#define\s+(\w+)\s+0x([0-9A-Fa-f]+)", line)
-
-            if comment_match:
-                text = comment_match.group(1).strip()
-                if "command" in text.lower():
-                    base_name = (
-                        text.lower()
-                        .replace("ack", "")
-                        .replace("commands", "")
-                        .replace("command", "")
-                        .strip()
-                        .title()
-                    )
-                    if base_name not in groups:
-                        groups[base_name] = {"commands": [], "acks": []}
-                    current_group = base_name
-                    current_type = "acks" if "ack" in text.lower() else "commands"
-
-            elif define_match and current_group:
-                # Store the hex string as-is (without converting to int)
-                name, hex_str = define_match.groups()
-                hex_str = hex_str.strip()
-                groups[current_group][current_type].append((name, hex_str))
-
-    return groups
-
 class SerialApp:
-    def __init__(self, root):
+    def __init__(self, root, commands_file=None):
         self.root = root
         self.root.title("Serial Command Sender")
 
-        self.commands_file = find_commands_file()
+        self.commands_file = find_commands_file(commands_file)
         self.groups_data = parse_groups(self.commands_file)
         self.filtered_data = self.groups_data.copy()
 
         self.serial_conn = None
+        self.events = queue.Queue(maxsize=1000)
+        self.reader_stop = threading.Event()
+        self.reader = None
+        self.session = 0
+        self.last_received = 0
+        self.decoder = AckDecoder(self.groups_data)
+        self.receive_mode = tk.StringVar(value="Raw bytes")
         self.baud_rate = ttk.StringVar(value="9600")
         self.port = ttk.StringVar()
         self.end_char = ttk.StringVar(value="0D")
@@ -92,6 +64,9 @@ class SerialApp:
         self.search_text = tk.StringVar()
 
         self.setup_ui()
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.poll_id = self.root.after(30, self.process_events)
+        self.log(f"Header: {self.commands_file}")
 
     def setup_ui(self):
         top = ttk.Frame(self.root)
@@ -110,14 +85,14 @@ class SerialApp:
             top, textvariable=self.port, values=self.get_ports(), width=10
         )
         self.port_combo.grid(row=0, column=3)
-        ttk.Button(top, text="⟳", command=self.refresh_ports).grid(row=0, column=4)
+        ttk.Button(top, text="Refresh", command=self.refresh_ports).grid(row=0, column=4)
 
         ttk.Label(top, text="End Char:").grid(row=0, column=5)
         end_combo = ttk.Combobox(
             top,
             textvariable=self.end_char_option,
             values=list(END_CHAR_OPTIONS.keys()),
-            width=18,
+            width=18, state="readonly",
         )
         end_combo.grid(row=0, column=6)
         end_combo.bind("<<ComboboxSelected>>", self.update_end_char)
@@ -132,6 +107,17 @@ class SerialApp:
         self.output.pack(padx=10, fill=X)
         self.output.text.config(state="disabled")
 
+        self.decoded_output = ScrolledText(self.root, height=4, autohide=True)
+        self.decoded_output.pack(padx=10, pady=(5, 0), fill=X)
+        self.decoded_output.text.config(state="disabled")
+        receive_controls = ttk.Frame(self.root)
+        receive_controls.pack(padx=10, pady=5, fill=X)
+        ttk.Label(receive_controls, text="Receive encoding:").pack(side=LEFT)
+        receive_combo = ttk.Combobox(receive_controls, textvariable=self.receive_mode,
+                                     values=AckDecoder.MODES, state="readonly", width=15)
+        receive_combo.pack(side=LEFT, padx=5)
+        receive_combo.bind("<<ComboboxSelected>>", self.change_receive_mode)
+
         monitor_controls = ttk.Frame(self.root)
         monitor_controls.pack(padx=10, pady=(5, 10), fill=X)
         ttk.Label(monitor_controls, text="Display Format:").pack(side=LEFT)
@@ -139,7 +125,7 @@ class SerialApp:
             monitor_controls,
             textvariable=self.display_format,
             values=DISPLAY_FORMATS,
-            width=15,
+            width=15, state="readonly",
         ).pack(side=LEFT, padx=(5, 20))
         ttk.Label(monitor_controls, text="Auto Scroll:").pack(side=LEFT)
         ttk.Checkbutton(monitor_controls, variable=self.auto_scroll).pack(side=LEFT)
@@ -265,19 +251,49 @@ class SerialApp:
         self.port_combo["values"] = self.get_ports()
 
     def connect(self):
+        if self.serial_conn is not None:
+            self.log("Already connected. Disconnect before changing ports.")
+            return
         try:
-            self.serial_conn = serial.Serial(
-                self.port.get(), int(self.baud_rate.get()), timeout=1
-            )
-            threading.Thread(target=self.read_serial, daemon=True).start()
-            self.log("Connected to serial port.")
-        except Exception as e:
-            self.log(f"Connection error: {e}")
+            if not self.port.get().strip() or int(self.baud_rate.get()) <= 0:
+                raise ValueError("Select a COM port and a positive baud rate.")
+            connection = serial.Serial(self.port.get(), int(self.baud_rate.get()),
+                                       timeout=0.1, write_timeout=1)
+            self.serial_conn = connection
+            self.session += 1
+            self.decoder.reset()
+            self.reader_stop = threading.Event()
+            self.reader = threading.Thread(target=self.read_serial,
+                args=(connection, self.reader_stop, self.session), daemon=True)
+            self.reader.start()
+            self.log(f"Connected to {self.port.get()} at {self.baud_rate.get()} baud.")
+        except (ValueError, serial.SerialException, OSError) as error:
+            self.log(f"Connection error: {error}")
 
     def disconnect(self):
-        if self.serial_conn and self.serial_conn.is_open:
-            self.serial_conn.close()
+        self.reader_stop.set()
+        connection = self.serial_conn
+        self.serial_conn = None
+        self.session += 1
+        if connection:
+            try:
+                connection.close()
+            except (serial.SerialException, OSError) as error:
+                self.log(f"Close error: {error}")
             self.log("Disconnected.")
+        if self.reader:
+            self.reader.join(timeout=0.3)
+        self.decoder.reset()
+
+    def close(self):
+        self.disconnect()
+        self.root.after_cancel(self.poll_id)
+        self.root.destroy()
+
+    def change_receive_mode(self, event=None):
+        self.decoder.reset()
+        self.decoder.mode = self.receive_mode.get()
+        self.log(f"Receive encoding: {self.decoder.mode}")
 
     def send_command(self, value_hex):
         """
@@ -315,14 +331,49 @@ class SerialApp:
         else:
             self.log("Serial port not open.")
 
-    def read_serial(self):
-        while self.serial_conn and self.serial_conn.is_open:
+    def read_serial(self, connection, stop, session):
+        # This worker never accesses Tk widgets or Tk variables.
+        while not stop.is_set():
             try:
-                line = self.serial_conn.readline()
-                if line:
-                    self.log(f"Received: {self.format_bytes(line)}")
-            except Exception:
+                data = connection.read(min(connection.in_waiting or 1, 4096))
+                if not data:
+                    continue
+                event = (session, "data", data)
+            except (serial.SerialException, OSError) as error:
+                if stop.is_set():
+                    return
+                event = (session, "error", str(error))
+            while not stop.is_set():
+                try:
+                    self.events.put(event, timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
+            if event[1] == "error":
+                return
+
+    def process_events(self):
+        for _ in range(100):
+            try:
+                session, kind, value = self.events.get_nowait()
+            except queue.Empty:
                 break
+            if session != self.session:
+                continue
+            if kind == "error":
+                self.log(f"Receive error: {value}")
+                self.disconnect()
+            else:
+                self.log(f"Received: {self.format_bytes(value)}")
+                self.show_decoded(self.decoder.feed(value))
+                self.last_received = time.monotonic()
+        if self.events.empty() and self.decoder.buffer and time.monotonic() - self.last_received >= 0.3:
+            self.show_decoded(self.decoder.feed(final=True))
+        self.poll_id = self.root.after(30, self.process_events)
+
+    def show_decoded(self, messages):
+        for message in messages:
+            self.append_output(self.decoded_output.text, f'Decoded return message: "{message}"')
 
     def format_bytes(self, data):
         fmt = self.display_format.get()
@@ -341,22 +392,38 @@ class SerialApp:
             )
             return f"{hex_part}  ({ascii_part})"
 
-    def log(self, text):
-        self.output.text.config(state="normal")
-        self.output.text.insert("end", text + "\n")
-        self.output.text.config(state="disabled")
+    def append_output(self, widget, text):
+        widget.config(state="normal")
+        widget.insert("end", text + "\n")
+        # Bound history so a long-running monitor does not grow indefinitely.
+        lines = int(widget.index("end-1c").split(".")[0])
+        if lines > 2000:
+            widget.delete("1.0", f"{lines - 2000 + 1}.0")
+        widget.config(state="disabled")
         if self.auto_scroll.get():
-            try:
-                self.output.text.see("end")
-            except Exception:
-                pass
+            widget.see("end")
+
+    def log(self, text):
+        self.append_output(self.output.text, text)
 
     def clear_log(self):
-        self.output.text.config(state="normal")
-        self.output.text.delete("1.0", "end")
-        self.output.text.config(state="disabled")
+        for widget in (self.output.text, self.decoded_output.text):
+            widget.config(state="normal")
+            widget.delete("1.0", "end")
+            widget.config(state="disabled")
+        self.decoder.reset()
 
-if __name__ == "__main__":
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Send serial commands and decode ACK replies.")
+    parser.add_argument("--commands", type=Path, help="Path to the device command header")
+    args = parser.parse_args(argv)
     app = ttk.Window(themename="darkly")
-    SerialApp(app)
-    app.mainloop()
+    try:
+        SerialApp(app, args.commands)
+    except (OSError, ValueError) as error:
+        messagebox.showerror("Cannot load command header", str(error), parent=app)
+        app.destroy()
+        return 1
+    else:
+        app.mainloop()
+    return 0

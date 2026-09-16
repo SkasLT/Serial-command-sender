@@ -1,0 +1,38 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Build products and package metadata
+/build/
+/dist/*
+*.egg-info/
+*.egg
+.eggs/
+*.exe
+*.spec
+
+# Keep the ready-to-run Windows app and its header in the repository.
+!/dist/Serial Command Sender.exe
+!/dist/My_device_commands.h
+
+# Local configuration and editor/OS files
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log

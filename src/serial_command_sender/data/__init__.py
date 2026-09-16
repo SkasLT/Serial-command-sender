@@ -1,0 +1,1 @@
+"""Bundled example device definitions."""
