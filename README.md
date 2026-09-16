@@ -108,6 +108,10 @@ Choose **Receive encoding** to match the device's wire protocol:
 or the bytes sent. **End Char** only controls the terminator appended to commands.
 **Clear Output** clears both displays and pending decoder input.
 
+Use the mouse wheel over the traffic display, decoded-message display, or command
+list to scroll that panel, including when hovering over command labels or buttons.
+Disable **Auto Scroll** to keep reading older output while new traffic arrives.
+
 Numeric text uses one complete ACK value per token; separate values with spaces,
 commas, semicolons, CR, LF, or NUL. For a multi-byte ACK `0x0601`, send text `0601`
 in HEX text mode or `1537` in DEC text mode, not separate byte tokens.

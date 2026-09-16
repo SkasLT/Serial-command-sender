@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- Mouse-wheel scrolling in the traffic display, decoded-message display, and command list.
+
 ## [1.3.0] - 2026-09-16
 
 ### Added

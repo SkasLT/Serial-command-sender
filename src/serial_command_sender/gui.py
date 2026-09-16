@@ -164,6 +164,51 @@ class SerialApp:
         )
 
         self.render_command_groups()
+        self.scroll_areas = {
+            self.output: self.output.text,
+            self.decoded_output: self.decoded_output.text,
+            canvas_frame: self.command_canvas,
+        }
+        self.wheel_tag = f"SerialMouseWheel{id(self)}"
+        self.wheel_target = None
+        self.wheel_remainder = 0.0
+        self.window_system = self.root.tk.call("tk", "windowingsystem")
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.root.bind_class(self.wheel_tag, sequence, self.scroll_with_mousewheel)
+        self.add_wheel_bindings(self.root)
+
+    def add_wheel_bindings(self, widget):
+        # Run before native Text/Combobox bindings to avoid scrolling twice.
+        tags = widget.bindtags()
+        if self.wheel_tag not in tags:
+            widget.bindtags((self.wheel_tag,) + tags)
+        for child in widget.winfo_children():
+            self.add_wheel_bindings(child)
+
+    def scroll_with_mousewheel(self, event):
+        # Windows can deliver wheel events to the focused widget. Route using
+        # pointer coordinates so a different panel never scrolls by accident.
+        widget = self.root.winfo_containing(event.x_root, event.y_root)
+        while widget is not None and widget not in self.scroll_areas:
+            widget = widget.master
+        if widget is None:
+            return
+        target = self.scroll_areas[widget]
+        if target is not self.wheel_target:
+            self.wheel_target = target
+            self.wheel_remainder = 0.0
+        if event.num in (4, 5):
+            amount = -3 if event.num == 4 else 3
+        elif self.window_system == "aqua":
+            amount = -event.delta
+        else:
+            amount = -event.delta / 120 * 3
+        self.wheel_remainder += amount
+        units = int(self.wheel_remainder)
+        self.wheel_remainder -= units
+        if units and target.yview() != (0.0, 1.0):
+            target.yview_scroll(units, "units")
+        return "break"
 
     def filter_commands(self):
         query = self.search_text.get().lower()
@@ -185,6 +230,8 @@ class SerialApp:
             self.create_group_section(
                 self.command_frame, group, data["commands"], data["acks"]
             )
+        if hasattr(self, "wheel_tag"):
+            self.add_wheel_bindings(self.command_frame)
 
     def create_group_section(self, parent, title, commands, acks):
         container = ttk.Frame(parent)
