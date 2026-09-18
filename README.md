@@ -93,7 +93,7 @@ provides the standardized metadata and build interface.
 The small display below the traffic monitor shows, for example:
 
 ```text
-Decoded return message: "MIXER_STARTED"
+[14:05:09] Decoded return message: "MIXER_STARTED"
 ```
 
 Choose **Receive encoding** to match the device's wire protocol:
@@ -107,6 +107,13 @@ Choose **Receive encoding** to match the device's wire protocol:
 **Display Format** only changes how traffic is shown. It does not change decoding
 or the bytes sent. **End Char** only controls the terminator appended to commands.
 **Clear Output** clears both displays and pending decoder input.
+
+Every traffic and decoded-message entry starts with a local 24-hour timestamp
+in `[HH:MM:SS]` format, for example `[14:05:09] Sent: 01 0D`.
+Receive timestamps are captured when the application reads the bytes, and the
+matching decoded messages use that same time. A reply assembled from multiple
+reads uses the time of the read that completes it; idle-gap decoding retains the
+last read's timestamp. These are PC timestamps, not device-generated timestamps.
 
 Use the mouse wheel over the traffic display, decoded-message display, or command
 list to scroll that panel, including when hovering over command labels or buttons.

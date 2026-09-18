@@ -7,6 +7,7 @@ import serial
 import serial.tools.list_ports
 import threading
 import argparse
+from datetime import datetime
 from pathlib import Path
 import queue
 import time
@@ -53,6 +54,7 @@ class SerialApp:
         self.reader = None
         self.session = 0
         self.last_received = 0
+        self.last_received_timestamp = None
         self.decoder = AckDecoder(self.groups_data)
         self.receive_mode = tk.StringVar(value="Raw bytes")
         self.baud_rate = ttk.StringVar(value="9600")
@@ -385,11 +387,11 @@ class SerialApp:
                 data = connection.read(min(connection.in_waiting or 1, 4096))
                 if not data:
                     continue
-                event = (session, "data", data)
+                event = (session, "data", data, datetime.now())
             except (serial.SerialException, OSError) as error:
                 if stop.is_set():
                     return
-                event = (session, "error", str(error))
+                event = (session, "error", str(error), datetime.now())
             while not stop.is_set():
                 try:
                     self.events.put(event, timeout=0.1)
@@ -402,25 +404,26 @@ class SerialApp:
     def process_events(self):
         for _ in range(100):
             try:
-                session, kind, value = self.events.get_nowait()
+                session, kind, value, timestamp = self.events.get_nowait()
             except queue.Empty:
                 break
             if session != self.session:
                 continue
             if kind == "error":
-                self.log(f"Receive error: {value}")
+                self.log(f"Receive error: {value}", timestamp)
                 self.disconnect()
             else:
-                self.log(f"Received: {self.format_bytes(value)}")
-                self.show_decoded(self.decoder.feed(value))
+                self.log(f"Received: {self.format_bytes(value)}", timestamp)
+                self.show_decoded(self.decoder.feed(value), timestamp)
                 self.last_received = time.monotonic()
+                self.last_received_timestamp = timestamp
         if self.events.empty() and self.decoder.buffer and time.monotonic() - self.last_received >= 0.3:
-            self.show_decoded(self.decoder.feed(final=True))
+            self.show_decoded(self.decoder.feed(final=True), self.last_received_timestamp)
         self.poll_id = self.root.after(30, self.process_events)
 
-    def show_decoded(self, messages):
+    def show_decoded(self, messages, timestamp=None):
         for message in messages:
-            self.append_output(self.decoded_output.text, f'Decoded return message: "{message}"')
+            self.append_output(self.decoded_output.text, f'Decoded return message: "{message}"', timestamp)
 
     def format_bytes(self, data):
         fmt = self.display_format.get()
@@ -439,9 +442,10 @@ class SerialApp:
             )
             return f"{hex_part}  ({ascii_part})"
 
-    def append_output(self, widget, text):
+    def append_output(self, widget, text, timestamp=None):
+        timestamp = timestamp if timestamp is not None else datetime.now()
         widget.config(state="normal")
-        widget.insert("end", text + "\n")
+        widget.insert("end", f"[{timestamp:%H:%M:%S}] {text}\n")
         # Bound history so a long-running monitor does not grow indefinitely.
         lines = int(widget.index("end-1c").split(".")[0])
         if lines > 2000:
@@ -450,8 +454,8 @@ class SerialApp:
         if self.auto_scroll.get():
             widget.see("end")
 
-    def log(self, text):
-        self.append_output(self.output.text, text)
+    def log(self, text, timestamp=None):
+        self.append_output(self.output.text, text, timestamp)
 
     def clear_log(self):
         for widget in (self.output.text, self.decoded_output.text):

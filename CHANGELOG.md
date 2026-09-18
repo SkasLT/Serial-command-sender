@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.0] - 2026-09-18
+
+### Added
+- Local 24-hour `[HH:MM:SS]` timestamps before sent, received, decoded, and status messages.
+- Received data and its decoded ACKs share the receive timestamp, including replies decoded after an idle gap.
+
 ## [1.3.0] - 2026-09-16
 
 ### Added
