@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5.0] - 2026-09-18
+
+### Added
+- Load Command File button to select a header from any folder, with its full path shown below the button.
+- Custom Windows executable, window, and taskbar icon bundled into the application.
+
+### Changed
+- The application can start without a header beside the executable; missing or ambiguous automatic selection leaves the app ready for manual selection.
+- Headers can be reloaded without restarting. Successful loads disconnect the previous serial session and replace the command list and ACK decoder; invalid selections preserve the active configuration.
+
 ## [1.4.0] - 2026-09-18
 
 ### Added

@@ -2,7 +2,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.scrolled import ScrolledText
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 import serial
 import serial.tools.list_ports
 import threading
@@ -33,20 +33,23 @@ def find_commands_file(filepath=None):
     frozen = getattr(sys, "frozen", False)
     directory = Path(sys.executable).parent if frozen else Path.cwd()
     files = sorted(directory.glob("*_commands.h"))
-    if not files and not frozen:
-        return Path(__file__).resolve().parent / "data" / "My_device_commands.h"
     if len(files) != 1:
-        raise ValueError(f"Expected exactly one *_commands.h file in {directory}; found {len(files)}.")
+        return None
     return files[0]
 
 class SerialApp:
     def __init__(self, root, commands_file=None):
         self.root = root
         self.root.title("Serial Command Sender")
+        icon = Path(__file__).resolve().parent / "data" / "app.ico"
+        if sys.platform == "win32" and icon.is_file():
+            self.root.iconbitmap(str(icon))
+            self.root.iconbitmap(default=str(icon))
 
-        self.commands_file = find_commands_file(commands_file)
-        self.groups_data = parse_groups(self.commands_file)
-        self.filtered_data = self.groups_data.copy()
+        self.commands_file = None
+        self.groups_data = {}
+        self.filtered_data = {}
+        self.loaded_file = tk.StringVar(value="No command file loaded.")
 
         self.serial_conn = None
         self.events = queue.Queue(maxsize=1000)
@@ -68,9 +71,24 @@ class SerialApp:
         self.setup_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.poll_id = self.root.after(30, self.process_events)
-        self.log(f"Header: {self.commands_file}")
+        try:
+            startup_file = find_commands_file(commands_file)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Cannot load command header", str(error), parent=self.root)
+        else:
+            if startup_file is not None:
+                self.load_command_file(startup_file)
+            else:
+                self.log("No command file loaded. Click Load Command File to select a header.")
 
     def setup_ui(self):
+        file_controls = ttk.Frame(self.root)
+        file_controls.pack(padx=10, pady=5, fill=X)
+        ttk.Button(file_controls, text="Load Command File",
+                   command=self.load_command_file).pack(anchor="w")
+        ttk.Label(file_controls, textvariable=self.loaded_file, wraplength=900,
+                  justify=LEFT).pack(anchor="w", pady=(5, 0))
+
         top = ttk.Frame(self.root)
         top.pack(padx=10, pady=5, fill=X)
 
@@ -212,6 +230,41 @@ class SerialApp:
             target.yview_scroll(units, "units")
         return "break"
 
+    def load_command_file(self, filepath=None):
+        if filepath is None:
+            filepath = filedialog.askopenfilename(
+                parent=self.root, title="Select command header",
+                filetypes=[("C header files", "*.h"), ("All files", "*.*")],
+                initialdir=str(self.commands_file.parent) if self.commands_file else str(Path.home()),
+            )
+            if not filepath:
+                return False
+        # Validate everything before replacing the active command set.
+        try:
+            path = find_commands_file(filepath)
+            groups = parse_groups(path)
+            if not any(data["commands"] or data["acks"] for data in groups.values()):
+                raise ValueError("The header contains no command or ACK definitions.")
+            decoder = AckDecoder(groups, self.receive_mode.get())
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Cannot load command header", str(error), parent=self.root)
+            return False
+
+        # Stop the old session so pending replies cannot use the new ACK map.
+        self.disconnect()
+        self.commands_file = path
+        self.groups_data = groups
+        self.decoder = decoder
+        self.search_text.set("")
+        self.filter_commands()
+        self.command_canvas.yview_moveto(0)
+        self.loaded_file.set(f"Loaded command file: {path}")
+        self.decoded_output.text.config(state="normal")
+        self.decoded_output.text.delete("1.0", "end")
+        self.decoded_output.text.config(state="disabled")
+        self.log(f"Loaded command file: {path}")
+        return True
+
     def filter_commands(self):
         query = self.search_text.get().lower()
         if not query:
@@ -228,6 +281,9 @@ class SerialApp:
     def render_command_groups(self):
         for widget in self.command_frame.winfo_children():
             widget.destroy()
+        if not self.filtered_data:
+            message = "Load a command file to see its commands and ACKs." if self.commands_file is None else "No matching commands."
+            ttk.Label(self.command_frame, text=message).pack(padx=10, pady=10)
         for group, data in self.filtered_data.items():
             self.create_group_section(
                 self.command_frame, group, data["commands"], data["acks"]
@@ -468,6 +524,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Send serial commands and decode ACK replies.")
     parser.add_argument("--commands", type=Path, help="Path to the device command header")
     args = parser.parse_args(argv)
+    if sys.platform == "win32":
+        # Give the running app its own taskbar identity instead of Python's.
+        import ctypes
+        set_app_id = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+        set_app_id.argtypes = [ctypes.c_wchar_p]
+        set_app_id.restype = ctypes.c_long
+        set_app_id("SkasLT.SerialCommandSender")
     app = ttk.Window(themename="darkly")
     try:
         SerialApp(app, args.commands)

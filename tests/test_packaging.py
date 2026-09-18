@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from serial_command_sender.ack_decoder import parse_groups
 from serial_command_sender.gui import find_commands_file
 
 
@@ -23,24 +22,22 @@ class PackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             directory = Path(folder)
             with patch("serial_command_sender.gui.Path.cwd", return_value=directory):
-                self.assertIn("Mixer", parse_groups(find_commands_file()))
+                self.assertIsNone(find_commands_file())
                 custom = directory / "Device_commands.h"
                 custom.write_text("// Device commands\n#define START 1\n")
                 self.assertEqual(find_commands_file(), custom)
                 second = directory / "Other_commands.h"
                 second.write_text(custom.read_text())
-                with self.assertRaises(ValueError):
-                    find_commands_file()
+                self.assertIsNone(find_commands_file())
                 self.assertEqual(find_commands_file(custom), custom.resolve())
 
-    def test_frozen_requires_external_header(self):
+    def test_frozen_can_start_without_external_header(self):
         with tempfile.TemporaryDirectory() as folder:
             directory = Path(folder)
             with patch("serial_command_sender.gui.sys.frozen", True, create=True), patch(
                 "serial_command_sender.gui.sys.executable", str(directory / "app.exe")
             ):
-                with self.assertRaises(ValueError):
-                    find_commands_file()
+                self.assertIsNone(find_commands_file())
                 header = directory / "Device_commands.h"
                 header.write_text("// Device commands\n#define START 1\n")
                 self.assertEqual(find_commands_file(), header)

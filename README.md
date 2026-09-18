@@ -4,15 +4,16 @@ Send raw serial commands from a C header and decode incoming ACK values by name.
 
 ## Run the included Windows app
 
-Copy these two files from `dist/` into the same folder on another Windows PC:
+Copy [Serial Command Sender.exe](dist/Serial%20Command%20Sender.exe) from `dist/`
+to another Windows PC and double-click it. Python is not required, and no header
+needs to be beside the executable.
 
-- [Serial Command Sender.exe](dist/Serial%20Command%20Sender.exe)
-- [My_device_commands.h](dist/My_device_commands.h)
+Click **Load Command File** and select your device's `.h` file from any folder.
+The full path appears below the button. An optional
+[example header](dist/My_device_commands.h) is included in the repository.
 
-Double-click the executable. Python and a separate release download are not
-required. These two files are intentionally kept in the repository for easy
-copying. When changing the Python source, rebuild the executable and commit the
-updated binary along with the source changes.
+When changing the Python source, rebuild the executable and commit the updated
+binary along with the source changes.
 
 ## Development setup
 
@@ -38,15 +39,21 @@ For a normal installation without build tools, use `python -m pip install .`.
 .venv/Scripts/python -m serial_command_sender --commands "C:/devices/My_device_commands.h"
 ```
 
-With no `--commands` argument, the Python application uses the single
-`*_commands.h` in the current working directory, or the packaged example at
-`src/serial_command_sender/data/My_device_commands.h` when none is present.
-Multiple matching headers produce an error. Copy the example to your device
-folder and customize that copy instead of editing files inside an installation.
+Use **Load Command File** to select or reload any `.h` file; it does not need
+to be named `*_commands.h`. The label below the button always shows the active
+file's full path and is not erased by **Clear Output**.
 
-The portable executable requires one `*_commands.h` beside the executable unless
-`--commands` is supplied. It does not depend on the launch working directory.
-The active header's path appears in the traffic display.
+The `--commands` argument still loads a header at startup. Otherwise, a single
+`*_commands.h` beside the executable (or in the working directory for Python)
+is loaded automatically for convenience. If none or multiple are found, the app
+opens with no command file loaded so you can choose one. The bundled example for
+source installations is at `src/serial_command_sender/data/My_device_commands.h`.
+
+Canceling the picker or selecting an invalid header preserves the current command
+set. A successful load disconnects any active serial session, resets the search
+and partial decoder input, and clears the decoded display. Reconnect to resume
+communication. Traffic history remains visible. After editing a header, use the
+button to reload it; no restart is needed. Selections are not saved across launches.
 
 ## Project layout
 
@@ -66,6 +73,7 @@ Serial-command-sender/
       ack_decoder.py
       data/
         __init__.py
+        app.ico               # Executable and Windows window/taskbar icon
         My_device_commands.h
   scripts/
     build_exe.py
@@ -77,7 +85,7 @@ Serial-command-sender/
   build/                      # Generated; ignored by Git
   dist/
     Serial Command Sender.exe # Included for easy copying
-    My_device_commands.h      # Required alongside the executable
+    My_device_commands.h      # Optional example command header
     legacy/                   # Local backups; ignored by Git
 ```
 
@@ -173,7 +181,7 @@ Run these commands in PowerShell from the project directory on Windows:
 The script uses the current environment, resolves paths from the project root,
 and preserves an existing customized header in `dist/` when rebuilding.
 
-Distribute these two files together (for example, in a ZIP):
+The executable can be distributed alone, or with the optional example header:
 
 ```text
 dist/
@@ -183,11 +191,20 @@ dist/
 
 The target PC does not need Python. It needs Windows compatible with the build
 architecture and a driver for its USB serial adapter. The header remains editable;
-restart the program after changing it. The previous root-level executable and
+reload it with **Load Command File** after changing it. The previous root-level executable and
 header have been preserved locally in `dist/legacy/`; new builds are in `dist/`.
 
 PyInstaller's `--onefile` packages dependencies into one executable; `--windowed`
 suppresses the console. See the [official PyInstaller usage documentation](https://pyinstaller.org/en/stable/usage.html).
+
+## Custom Windows icon
+
+The Windows icon is stored at `src/serial_command_sender/data/app.ico`. To change
+it, replace that file with a multi-resolution Windows `.ico` and run
+`.venv/Scripts/python scripts/build_exe.py`. The build embeds it in the executable
+and bundles it for the running window; no separate icon file is needed beside the
+`.exe`. Windows may cache a pinned shortcut's previous icon; unpin and re-pin the
+rebuilt application if necessary.
 
 ## Build Python distributions
 

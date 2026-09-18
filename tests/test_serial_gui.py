@@ -1,5 +1,8 @@
 import time
 import unittest
+import tempfile
+from pathlib import Path
+from importlib.resources import files
 from datetime import datetime
 from unittest.mock import patch
 
@@ -12,7 +15,7 @@ class GuiTests(unittest.TestCase):
     def setUpClass(cls):
         cls.root = Serial_gui.ttk.Window(themename="darkly")
         cls.root.withdraw()
-        cls.app = Serial_gui.SerialApp(cls.root)
+        cls.app = Serial_gui.SerialApp(cls.root, files("serial_command_sender.data").joinpath("My_device_commands.h"))
 
     @classmethod
     def tearDownClass(cls):
@@ -82,6 +85,56 @@ class GuiTests(unittest.TestCase):
         finally:
             app.decoder.mode = "Raw bytes"
             app.clear_log()
+
+    def test_load_header_after_empty_startup(self):
+        window = Serial_gui.tk.Toplevel(self.root)
+        window.withdraw()
+        with patch.object(Serial_gui, "find_commands_file", return_value=None):
+            app = Serial_gui.SerialApp(window)
+        try:
+            self.assertIsNone(app.commands_file)
+            self.assertEqual(app.loaded_file.get(), "No command file loaded.")
+            with tempfile.TemporaryDirectory() as folder:
+                header = Path(folder) / "custom.h"
+                header.write_text("// Device commands\n#define START 1\n"
+                                  "// Device ack commands\n#define READY 0x8101\n")
+                with patch.object(Serial_gui.filedialog, "askopenfilename", return_value=str(header)):
+                    self.assertTrue(app.load_command_file())
+                self.assertEqual(app.commands_file, header.resolve())
+                self.assertIn(str(header.resolve()), app.loaded_file.get())
+                self.assertEqual(app.decoder.feed(b"\x81\x01"), ["READY"])
+                self.assertTrue(app.command_frame.winfo_children())
+                app.search_text.set("START")
+                app.filter_commands()
+                app.port.set("test")
+                connection = serial.serial_for_url("loop://", timeout=0.1)
+                with patch.object(Serial_gui.serial, "Serial", return_value=connection):
+                    app.connect()
+                invalid = Path(folder) / "invalid.h"
+                invalid.write_text("not a command header")
+                with patch.object(Serial_gui.messagebox, "showerror") as error:
+                    self.assertFalse(app.load_command_file(invalid))
+                    error.assert_called_once()
+                with patch.object(Serial_gui.filedialog, "askopenfilename", return_value=""):
+                    self.assertFalse(app.load_command_file())
+                self.assertTrue(connection.is_open)
+                self.assertEqual(app.commands_file, header.resolve())
+                app.decoder.feed(b"\x81")
+                previous_session = app.session
+                header.write_text("// Other commands\n#define STOP 2\n"
+                                  "// Other ack commands\n#define STOPPED 0x82\n")
+                app.receive_mode.set("HEX text")
+                self.assertTrue(app.load_command_file(header))
+                self.assertFalse(connection.is_open)
+                self.assertGreater(app.session, previous_session)
+                self.assertEqual(app.search_text.get(), "")
+                self.assertEqual(app.decoder.buffer, b"")
+                self.assertEqual(app.decoder.feed(b"82\n"), ["STOPPED"])
+                self.assertNotIn("Device", app.groups_data)
+                app.clear_log()
+                self.assertIn(str(header.resolve()), app.loaded_file.get())
+        finally:
+            app.close()
 
 
 if __name__ == "__main__":
